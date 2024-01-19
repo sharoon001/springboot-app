@@ -1,8 +1,8 @@
 pipeline{
     agent any
     environment {
-	    REPOSITORY = credentials('repository')
-        IMAGE = "spring-app"
+	REPOSITORY = credentials('repository')
+        IMAGE = "spring-app-dev"
         TAG = "${BUILD_NUMBER}"
         CLUSTER_NAME = 'production-cluster-cluster'
         REGION = 'us-east-2'
@@ -37,7 +37,7 @@ pipeline{
         stage("Docker Build & Push"){
             steps{
                 script{
-			        sh "sudo docker build -t ${IMAGE} ."
+		    sh "sudo docker build -t ${IMAGE} ."
                     sh "aws ecr get-login-password --region ${REGION} | sudo docker login --username AWS --password-stdin ${REPOSITORY}"
                     sh "sudo docker tag ${IMAGE} ${REPOSITORY}/${IMAGE}:${TAG} "
                     sh "sudo docker push ${REPOSITORY}/${IMAGE}:${TAG} "
@@ -106,7 +106,7 @@ sudo apt install -y pritunl-client-electron'''
         }
         stage('Deploy helm chart'){
             steps{
-                sh "helm upgrade --install spring-app springboot-app-chart --set image.repository=${REPOSITORY}/${IMAGE} --set image.tag=${TAG} -n dev"
+                sh "helm upgrade --install spring-app springboot-app-chart -f springboot-app-chart/values-dev.yaml --set image.repository=${REPOSITORY}/${IMAGE} --set image.tag=${TAG} -n dev"
                 sh "helm ls -n dev"
             }
         }
