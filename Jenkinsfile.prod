@@ -1,0 +1,120 @@
+pipeline{
+    agent any
+    environment {
+	    REPOSITORY = credentials('repository')
+        IMAGE = "spring-app"
+        TAG = "${BUILD_NUMBER}"
+        CLUSTER_NAME = 'production-cluster-cluster'
+        REGION = 'us-east-2'
+        VPN_PIN = credentials('vpn_pin')
+        SCANNER_HOME=tool 'sonar-scanner'
+    }
+    stages {
+        stage('clean workspace'){
+            steps{
+                cleanWs()
+            }
+        }
+        stage('Checkout from Git'){
+            steps{
+                git branch: 'prod', url: 'https://github.com/sharoon001/springboot-app.git/'
+            }
+        }
+        stage("Sonarqube Analysis "){
+            steps{
+                withSonarQubeEnv('sonar-server') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=spring-app \
+                    -Dsonar.projectKey=spring-app '''
+                }
+            }
+        }
+        stage('OWASP FS SCAN') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage("Docker Build & Push"){
+            steps{
+                script{
+			        sh "sudo docker build -t ${IMAGE} ."
+                    sh "aws ecr get-login-password --region ${REGION} | sudo docker login --username AWS --password-stdin ${REPOSITORY}"
+                    sh "sudo docker tag ${IMAGE} ${REPOSITORY}/${IMAGE}:${TAG} "
+                    sh "sudo docker push ${REPOSITORY}/${IMAGE}:${TAG} "
+                    sh "sudo docker tag ${IMAGE} ${REPOSITORY}/${IMAGE}:latest "
+                    sh "sudo docker push ${REPOSITORY}/${IMAGE}:latest "
+                }
+            }
+        }
+        stage('Install trivy'){
+            steps{
+                sh "wget https://github.com/aquasecurity/trivy/releases/download/v0.18.3/trivy_0.18.3_Linux-64bit.deb"
+                sh "sudo dpkg -i trivy_0.18.3_Linux-64bit.deb"
+            }
+        }
+        stage(' Trivy Scan') {
+            steps {
+                // Scan again and fail on CRITICAL vulns
+                sh 'sudo trivy image ${REPOSITORY}/${IMAGE}:latest'
+
+            }
+        }
+        stage('Install kubectl'){
+            steps{
+                sh "curl -LO https://dl.k8s.io/release/v1.29.0/bin/linux/amd64/kubectl"
+                sh "sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl"
+                sh "kubectl version --client"
+            }
+        }
+        stage('Install pritunal'){
+            steps{
+                sh '''sudo tee /etc/apt/sources.list.d/pritunl.list << EOF
+deb https://repo.pritunl.com/stable/apt jammy main
+EOF
+
+sudo apt --assume-yes install gnupg
+gpg --keyserver hkp://keyserver.ubuntu.com --recv-keys 7568D9BB55FF9E5287D586017AE645C0CF8E292A
+gpg --armor --export 7568D9BB55FF9E5287D586017AE645C0CF8E292A | sudo tee /etc/apt/trusted.gpg.d/pritunl.asc
+sudo apt update
+sudo apt install -y pritunl-client-electron'''
+            }
+        }
+        stage('connect to pritunl'){
+            steps{
+                sh 'pritunl-client add ./sharoon2.tar'
+                sh 'pritunl-client start "$(pritunl-client list | awk \'NR>2 {print $2}\' | tr -d \'[:space:]\')" --password ${VPN_PIN}'
+            }
+        }
+        stage('list pritunl profile'){
+            steps{
+                sh 'pritunl-client list'
+            }
+        }
+        stage('configure EKS'){
+            steps{
+                sh "aws eks update-kubeconfig --region ${REGION} --name ${CLUSTER_NAME}"
+                sh "kubectl get nodes"
+            }
+        }
+        stage('Install helm'){
+            steps{
+                sh "curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3"
+                sh "chmod 700 get_helm.sh"
+                sh "./get_helm.sh"
+                sh "helm ls -A"
+            }
+        }
+        stage('Deploy helm chart'){
+            steps{
+                sh "helm upgrade --install spring-app springboot-app-chart --set image.repository=${REPOSITORY}/${IMAGE} --set image.tag=${TAG} -n prod"
+                sh "helm ls -n dev"
+            }
+        }
+        stage('disconnet and remove to pritunl'){
+            steps{
+                sh 'pritunl-client stop  "$(pritunl-client list | awk \'NR>2 {print $2}\' | tr -d \'[:space:]\')"'
+                sh 'pritunl-client remove "$(pritunl-client list | awk \'NR>2 {print $2}\' | tr -d \'[:space:]\')"'
+            }
+        }
+    }
+}
