@@ -106,7 +106,7 @@ sudo apt install -y pritunl-client-electron'''
         }
         stage('Deploy helm chart'){
             steps{
-                sh "helm upgrade --install spring-app springboot-app-chart -f values-dev.yaml --set image.repository=${REPOSITORY}/${IMAGE} --set image.tag=${TAG} -n dev"
+                sh "helm upgrade --install spring-app springboot-app-chart -f springboot-app-chart/values-dev.yaml --set image.repository=${REPOSITORY}/${IMAGE} --set image.tag=${TAG} -n dev"
                 sh "helm ls -n dev"
             }
         }
