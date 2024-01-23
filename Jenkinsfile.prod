@@ -66,30 +66,6 @@ pipeline{
                 sh "kubectl version --client"
             }
         }
-        stage('Install pritunal'){
-            steps{
-                sh '''sudo tee /etc/apt/sources.list.d/pritunl.list << EOF
-deb https://repo.pritunl.com/stable/apt jammy main
-EOF
-
-sudo apt --assume-yes install gnupg
-gpg --keyserver hkp://keyserver.ubuntu.com --recv-keys 7568D9BB55FF9E5287D586017AE645C0CF8E292A
-gpg --armor --export 7568D9BB55FF9E5287D586017AE645C0CF8E292A | sudo tee /etc/apt/trusted.gpg.d/pritunl.asc
-sudo apt update
-sudo apt install -y pritunl-client-electron'''
-            }
-        }
-        stage('connect to pritunl'){
-            steps{
-                sh 'pritunl-client add ./sharoon2.tar'
-                sh 'pritunl-client start "$(pritunl-client list | awk \'NR>2 {print $2}\' | tr -d \'[:space:]\')" --password ${VPN_PIN}'
-            }
-        }
-        stage('list pritunl profile'){
-            steps{
-                sh 'pritunl-client list'
-            }
-        }
         stage('configure EKS'){
             steps{
                 sh "aws eks update-kubeconfig --region ${REGION} --name ${CLUSTER_NAME}"
@@ -108,12 +84,6 @@ sudo apt install -y pritunl-client-electron'''
             steps{
                 sh "helm upgrade --install spring-app springboot-app-chart -f springboot-app-chart/values-prod.yaml --set image.repository=${REPOSITORY}/${IMAGE} --set image.tag=${TAG} -n prod"
                 sh "helm ls -n dev"
-            }
-        }
-        stage('disconnet and remove to pritunl'){
-            steps{
-                sh 'pritunl-client stop  "$(pritunl-client list | awk \'NR>2 {print $2}\' | tr -d \'[:space:]\')"'
-                sh 'pritunl-client remove "$(pritunl-client list | awk \'NR>2 {print $2}\' | tr -d \'[:space:]\')"'
             }
         }
     }
